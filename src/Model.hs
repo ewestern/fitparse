@@ -6,9 +6,14 @@ import Data.Word
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.ByteString.Lazy (ByteString)
+import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import Signed
 import FileTypes
+import BaseTypes
+
+import TH.ProfileMessages
+import TH.ProfileTypes
 
 --- 
 data GlobalHeader  = GlobalHeader {
@@ -18,14 +23,11 @@ data GlobalHeader  = GlobalHeader {
   , crc :: Int
 } deriving (Eq, Ord, Show)
 
-
-
--- parseDataMessageContents :: V.Vector FieldDefinitionContents -> Get DataMessageContents
 data Message  
     = DataMessage MessageHeader DataMessageContents
     | DefinitionMessage MessageHeader DefinitionMessageContent
     | GlobalHeaderMessage GlobalHeader 
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 
 --
@@ -33,14 +35,13 @@ data Message
 --
 
 data MessageHeader
-  = NormalHeader {
-    messageType :: MessageType,
-    localMessageTypeNormal :: Int
-  }
-  | CompressedTimestampHeader {
-    localMessageTypeCompressed :: Int,
-    timeOffset :: Int
-  }
+  = NormalHeader 
+    { messageType :: MessageType
+    , localMessageTypeNormal :: Int
+    , hasDev :: Bool }
+  | CompressedTimestampHeader 
+    { localMessageTypeCompressed :: Int,
+      timeOffset :: Int }
   deriving (Eq, Ord, Show)
 
 data MessageType 
@@ -48,14 +49,17 @@ data MessageType
   | DataMessageType
   deriving (Eq, Ord, Show)
 
---
+
+getLocalMessageType :: MessageHeader -> Int
+getLocalMessageType (NormalHeader _ lmt _) = lmt
+getLocalMessageType (CompressedTimestampHeader lmt _) = lmt
+
 
 ---
 -- Definition Message
 ---
-
 data DefinitionMessageContent = DefinitionMessageContent {
-  globalMessageNumber :: Int,
+  globalMessageNumber :: MesgNum,
   numFields :: Int,
   fieldDefinitionContents :: Vector FieldDefinitionContents,
   numDeveloperFields :: Maybe Int,
@@ -66,86 +70,6 @@ data DefinitionMessageContent = DefinitionMessageContent {
 --
 -- Data Message Contents
 --
-
-type DataMessageContents = V.Vector (V.Vector (Maybe BaseValue))
-
-data FitMessage
-  = FileIdMessage {
-    fileType :: FileType
-  , manufacturer :: Word16
-  , product :: Word16
-  , serial :: Word32
-  , timeCreated :: Maybe Word32
-  , number :: Maybe Word16
-  } | SoftwareMessage {
-    messageIndex :: Maybe Word16
-  , version :: Maybe Word16
-  , partNumber :: Maybe ByteString
-  } | CapabilitiesMessage {
-    languages :: Maybe Word16
-  }
-  
-
-
-data BaseType
-  = BTEnum
-  | BTSint8
-  | BTUint8
-  | BTSint16
-  | BTUint16
-  | BTSint32
-  | BTUint32
-  | BTString
-  | BTFloat32
-  | BTFloat64
-  | BTUint8z
-  | BTUint16z
-  | BTUint32z
-  | BTByte
-  | BTSint64
-  | BTUint64
-  | BTUint64z
-  deriving (Eq, Ord, Show)
-
-data BaseValue
-  = BVEnum Int
-  | BVSint8 (Signed Int8)
-  | BVUint8 (Unsigned Word8)
-  | BVSint16 (Signed Int16)
-  | BVUint16 (Unsigned Word16)
-  | BVSint32 (Signed Int32)
-  | BVUint32 (Unsigned Word32)
-  | BVString ByteString
-  | BVFloat32 Float
-  | BVFloat64 Double
-  | BVUint8z (Unsigned Word8)
-  | BVUint16z (Unsigned Word16)
-  | BVUint32z (Unsigned Word32)
-  | BVByte Word8
-  | BVSint64 (Signed Int64)
-  | BVUint64 (Unsigned Int64)
-  | BVUint64z (Unsigned Int64)
-  deriving (Eq, Ord, Show)
-
-numElements :: Int -> BaseType -> Int
-numElements size = \case
-  BTEnum -> size
-  BTSint8 -> size
-  BTUint8 -> size
-  BTSint16 -> div size 2
-  BTUint16 -> div size 2
-  BTSint32 -> div size 4
-  BTUint32 -> div size 4
-  BTString -> size
-  BTFloat32 -> div size 4
-  BTFloat64 -> div size 4
-  BTUint8z -> size
-  BTUint16z -> div size 2
-  BTUint32z -> div size 4
-  BTByte -> size
-  BTSint64 -> div size 8
-  BTUint64 -> div size 8
-  BTUint64z -> div size 8
 
 
 data FieldDefinitionContents
@@ -159,7 +83,10 @@ data FieldDefinitionContents
 
 
 data DeveloperFieldContents
-  = DeveloperFieldContents ()
+  = DeveloperFieldContents 
+    { fieldNumber :: Int
+    , devFieldSize :: Int
+    , devDataIndex :: Int }
   deriving (Eq, Ord, Show)
 
 

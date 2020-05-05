@@ -7,15 +7,22 @@ import Data.Int
 import Data.Serialize.Get
 import Data.Serialize.IEEE754
 import Data.Vector (Vector)
+import qualified Data.Map as M
 import Data.Word
 import qualified Data.Map as M
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Vector as V
 import Control.Monad
+import Debug.Trace
 
 import Model
+import TH.ProfileMessages
+import FitType
+import TH.ProfileTypes
 import Signed
+import BaseTypes
+
 
 getGlobalHeader :: Get GlobalHeader
 getGlobalHeader = do
@@ -28,34 +35,32 @@ getGlobalHeader = do
   pure $ GlobalHeader protocolVersion profileVersion dataSize crc
   
 {-
-  globalMessageNumber :: Int,
-  numFields :: Int,
-  fieldDefinitionContents :: Vector FieldDefinitionContents,
-  numDeveloperFields :: Maybe Int,
-  developerFieldContents :: Maybe (Vector DeveloperFieldContents)
--}
+ Definition Message: In a definition message, the local message type is assigned to a Global FIT Message Number (mesg_num) relating the local messages to their respective FIT messages
+Data Message: The local message type associates a data message to its respective definition message, and hence, its' global FIT message. A data message will follow the format as specified in its definition message of matching local message type.
+ -}
 
-getMessage :: M.Map Int DefinitionMessageContent -> Get (Either String Message)
+getMessage :: M.Map Int (Get DataMessageContents) -> Get (Either String Message)
 getMessage defs = do
   header <- getHeader
+  traceShowM header
   case header of
-    NormalHeader DefinitionMessageType lmt ->
-      Right . DefinitionMessage header <$> getDefinitionMessageContent
-    NormalHeader DataMessageType lmt -> case M.lookup lmt defs of
-      Just (DefinitionMessageContent messageNum numFields fdc ndf dfc) -> 
-          Right . DataMessage header
-        <$> parseDataMessageContents (fieldDefinitionContents dmc)
-      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt)
+    NormalHeader DefinitionMessageType lmt hasDev ->
+      Right . DefinitionMessage header <$> (getDefinitionMessageContent hasDev)
+    NormalHeader DataMessageType lmt hasDev -> case M.lookup lmt defs of
+      Just dmc -> Right . DataMessage header <$> dmc
+      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
     CompressedTimestampHeader lmt to -> case M.lookup lmt defs of
-      Just dmc -> Right . DataMessage header
-        <$> parseDataMessageContents (fieldDefinitionContents dmc)
-      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt)
+      Just dmc -> Right . DataMessage header <$> dmc
+      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
 
 
 
-getDefMessageContent ::Either String Message -> Maybe (Int, DefinitionMessageContent)
-getDefMessageContent (Right (DefinitionMessage (NormalHeader mt lmt) content)) = Just (lmt, content)
-getDefMessageContent _ = Nothing
+getParserForMessage ::Either String Message -> Maybe (Int, Get DataMessageContents)
+getParserForMessage (Right (DefinitionMessage (NormalHeader mt lmt _) (DefinitionMessageContent gmt _ _ _ _))) = 
+  case M.lookup gmt parserMap of
+    Just get -> Just (lmt, get)
+    _ -> Nothing
+getParserForMessage _ = Nothing
 
 getHeader :: Get MessageHeader
 getHeader = do
@@ -68,8 +73,8 @@ getHeader = do
 getNormalHeader :: Word8 -> MessageHeader  
 getNormalHeader i = 
   let messageType = if testBit i 6 then DefinitionMessageType else DataMessageType
-      localNum = fromIntegral $ shiftR i 4
-  in NormalHeader messageType localNum
+      localNum = fromIntegral $ shiftL i 4
+  in NormalHeader messageType localNum (testBit i 5)
   
   
 
@@ -87,36 +92,35 @@ getTimestampHeader i =
       localNum = shiftR i 1 .&. timestampLocalMessageTypeMask
   in  CompressedTimestampHeader (fromIntegral localNum) (fromIntegral off)
 
-getDefinitionMessageContent :: Get DefinitionMessageContent 
-getDefinitionMessageContent = do
+getDefinitionMessageContent :: Bool -> Get DefinitionMessageContent 
+getDefinitionMessageContent hasDev = do
   _ <- getWord8
   arch <- getWord8
   if (fromIntegral arch) == 1 
-    then getDefinitionMessageContentBE
-    else getDefinitionMessageContentLE
+     -- TODO: Come back to handle ENdianness
+    then getDefinitionMessageContentLE hasDev
+    else getDefinitionMessageContentLE hasDev
   
--- TODO return to developer fields
-getDefinitionMessageContentBE :: Get DefinitionMessageContent 
-getDefinitionMessageContentBE = do
-  gmn <- fromIntegral <$> getWord16be
+
+getDefinitionMessageContentLE :: Bool -> Get DefinitionMessageContent 
+getDefinitionMessageContentLE hasDev = do
+  gmn <- typeParser
   numField <- fromIntegral <$> getWord8
   defCon <- V.replicateM (fromIntegral numField) getFieldDefinitionContents
-  pure $ DefinitionMessageContent gmn numField defCon Nothing Nothing
+  maybeDevFields <- if hasDev 
+     then do
+       numFields <- getIntByte
+       fieldDefs <- V.replicateM (fromIntegral numFields) getDevFieldDef
+       return $ Just (numFields, fieldDefs)
+      else return Nothing
+  pure $ DefinitionMessageContent gmn numField defCon (fmap fst maybeDevFields) (fmap snd maybeDevFields) 
+    where
+      getDevFieldDef :: Get DeveloperFieldContents
+      getDevFieldDef = DeveloperFieldContents <$> getIntByte <*> getIntByte <*> getIntByte
+      getIntByte :: Get Int
+      getIntByte = fromIntegral <$> getInt8
 
-
-getDefinitionMessageContentLE :: Get DefinitionMessageContent 
-getDefinitionMessageContentLE = do
-  gmn <- fromIntegral <$> getWord16le
-  numField <- fromIntegral <$> getWord8
-  defCon <- V.replicateM (fromIntegral numField) getFieldDefinitionContents
-  pure $ DefinitionMessageContent gmn numField defCon Nothing Nothing
-
-
-nullByte :: Word8
-nullByte = 0
-
-getNulTerminatedByteString :: Get ByteString
-getNulTerminatedByteString = fmap (BSL.pack . takeWhile (/= nullByte)) $ getListOf getWord8
+  
 
 getBaseType :: Word8 -> Maybe BaseType
 getBaseType = \case
@@ -140,41 +144,11 @@ getBaseType = \case
   _ -> Nothing
   
 
-parseDataMessageBaseValue :: BaseType -> Get (Maybe BaseValue)
-parseDataMessageBaseValue bt = case bt of
-  BTEnum    -> (Just . BVEnum . fromIntegral) <$> getWord8
-  BTSint8   -> (Just . BVSint8 . signed) <$> getWord8
-  BTUint8   -> (Just . BVUint8 . unsigned) <$> getWord8
-  BTSint16  -> (Just . BVSint16 . signed) <$> getWord16le
-  BTUint16  -> (Just . BVUint16 . unsigned) <$> getWord16le
-  BTSint32  -> (Just . BVSint32 . signed) <$> getWord32le
-  BTUint32  -> (Just . BVUint32 . unsigned) <$> getWord32le
-  BTString  -> (Just . BVString) <$> getNulTerminatedByteString
-  BTFloat32 -> (Just . BVFloat32) <$> getFloat32le
-  BTFloat64 -> (Just . BVFloat64) <$> getFloat64le
-  BTUint8z  -> pure Nothing
-  BTUint16z -> pure Nothing
-  BTUint32z -> pure Nothing
-  BTByte    -> (Just . BVByte) <$> getWord8
-  BTSint64  -> (Just . BVSint64 . signed) <$> getWord64le
-  BTUint64  -> (Just . BVUint64 . unsigned) <$> getWord64le
-  BTUint64z -> pure Nothing
-  _         -> pure Nothing
-
-
-parseDataMessageContent :: FieldDefinitionContents -> Get (Vector (Maybe BaseValue))
-parseDataMessageContent (FieldDefinitionContents _ size (Just bt)) = 
-  V.replicateM (numElements size bt) (parseDataMessageBaseValue bt)
-parseDataMessageContent _ = pure V.empty
-
-
-parseDataMessageContents :: V.Vector FieldDefinitionContents -> Get DataMessageContents
-parseDataMessageContents = V.mapM parseDataMessageContent 
-
 getFieldDefinitionContents :: Get FieldDefinitionContents
 getFieldDefinitionContents = do
-    fdn <- fromIntegral <$> getWord8
-    fieldSize <- fromIntegral <$> getWord8
+    fdn <- fromIntegral <$> getInt8
+    fieldSize <- fromIntegral <$> getInt8
     baseType <- getBaseType <$> getWord8
     return $ FieldDefinitionContents fdn fieldSize baseType
+
 

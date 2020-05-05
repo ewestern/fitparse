@@ -20,6 +20,7 @@ data FileType
   | MonitoringB
   | Segment
   | SegmentList
+  deriving (Show, Eq)
 
 
 getFileType :: Int -> Maybe FileType
