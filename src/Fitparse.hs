@@ -9,7 +9,6 @@ import           Control.Exception.Base
 import qualified Data.ByteString as BS
 import Data.Serialize.Get
 import Data.Conduit.Cereal hiding (GetException)
--- import qualified Data.Conduit.Combinators as (DC)
 import Data.Typeable
 import Data.Word
 import Data.ByteString.Lazy (ByteString)
@@ -26,12 +25,26 @@ readFitFile = do
   yield $ Right $ GlobalHeaderMessage gh
   messagesConduit
 
+dataMessageFilter :: ConduitT (Either String Message) DataMessageContents  M ()
+dataMessageFilter = loop
+  where 
+    loop = do
+      msg <- await
+      case msg of 
+        (Just (Right (DataMessage _ dmc))) -> do
+          yield dmc
+          loop
+        (Just _) -> loop
+        Nothing -> return ()
+
+
+
 newtype GetException = GetException String
   deriving (Show, Typeable)
 
 instance Exception GetException
 
-type State = M.Map Int (Get DataMessageContents)
+type State = M.Map Int (MessageHeader, DefinitionMessageContent)
 
 type M = ResourceT IO
 
@@ -62,7 +75,7 @@ messagesConduit  =
     result state (Partial f) = awaitNE >>= (result state) . f
     result state (Done x rest) = do
         yield x
-        let newState = maybe state (flip (uncurry M.insert) state) $ getParserForMessage x
+        let newState = maybe state (flip (uncurry M.insert) state) $ getHeaderForMap x
         if BS.null rest
             then awaitNE >>= start newState
             else start newState rest

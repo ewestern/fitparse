@@ -19,17 +19,30 @@ library
                      , Signed
                      , Parse
                      , FileTypes
+                     , BaseTypes
                      , Fitparse
+                     , FitType
+                     , FitMessage
+                     , TH.Types
+                     , TH.Messages
+                     , TH.ProfileTypes
+                     , TH.ProfileMessages
+
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , cereal
                      , conduit
                      , containers
                      , cereal-conduit
+                     , template-haskell
+                     , cassava
+                     , text
 --                     , pipes
 --                     , pipes-parse
                      , vector
                      , bytestring
+  ghc-options:
+    -ddump-splices
 
 test-suite test
   type:                 exitcode-stdio-1.0

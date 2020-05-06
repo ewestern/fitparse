@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Parse where
 
@@ -7,9 +8,11 @@ import Data.Int
 import Data.Serialize.Get
 import Data.Serialize.IEEE754
 import Data.Vector (Vector)
+import Data.Maybe
 import qualified Data.Map as M
 import Data.Word
 import qualified Data.Map as M
+import qualified Data.ByteString as BS
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Vector as V
@@ -39,28 +42,47 @@ getGlobalHeader = do
 Data Message: The local message type associates a data message to its respective definition message, and hence, its' global FIT message. A data message will follow the format as specified in its definition message of matching local message type.
  -}
 
-getMessage :: M.Map Int (Get DataMessageContents) -> Get (Either String Message)
+getMessage :: M.Map Int (MessageHeader, DefinitionMessageContent) -> Get (Either String Message)
 getMessage defs = do
   header <- getHeader
-  traceShowM header
   case header of
     NormalHeader DefinitionMessageType lmt hasDev ->
       Right . DefinitionMessage header <$> (getDefinitionMessageContent hasDev)
+
     NormalHeader DataMessageType lmt hasDev -> case M.lookup lmt defs of
-      Just dmc -> Right . DataMessage header <$> dmc
+      Just (header, definition) -> getMessageWithFieldDefinitions header definition
       Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
     CompressedTimestampHeader lmt to -> case M.lookup lmt defs of
-      Just dmc -> Right . DataMessage header <$> dmc
+      Just (header, definition) -> getMessageWithFieldDefinitions header definition
       Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
 
+getMessageWithFieldDefinitions :: MessageHeader -> DefinitionMessageContent -> Get (Either String Message)
+getMessageWithFieldDefinitions header@(NormalHeader _ lmc _) (DefinitionMessageContent gmn numFields fdc ndf df)
+  = do byteString <- getBytes $ sum $ fmap fieldSize fdc
+       let vec = fmap fieldDefinitionNumber fdc
+       case join $ traverse (flip M.lookup parserMap) gmn  of
+         Just dmcParser -> return $ fmap (DataMessage header) $ runGet (dmcParser vec) byteString
+         Nothing -> return $ Left $ "Couldn't find message num: " <> (show gmn)
+    where
+      getByteString :: V.Vector BS.ByteString -> M.Map Int Int -> Int -> Maybe BS.ByteString
+      getByteString byteStrings indexMap i = do
+        idx <- M.lookup i indexMap
+        byteStrings V.!? idx
+
+getHeaderForMap :: Either String Message -> Maybe (Int, (MessageHeader, DefinitionMessageContent))
+getHeaderForMap (Right (DefinitionMessage header@(NormalHeader mt lmt _) defMessage)) 
+  = Just (lmt, (header, defMessage))
+getHeaderForMap _ = Nothing
+  
 
 
-getParserForMessage ::Either String Message -> Maybe (Int, Get DataMessageContents)
-getParserForMessage (Right (DefinitionMessage (NormalHeader mt lmt _) (DefinitionMessageContent gmt _ _ _ _))) = 
-  case M.lookup gmt parserMap of
-    Just get -> Just (lmt, get)
-    _ -> Nothing
-getParserForMessage _ = Nothing
+
+-- getParserForMessage ::Either String Message -> Maybe (Int, Get DataMessageContents)
+-- getParserForMessage (Right (DefinitionMessage (NormalHeader mt lmt _) (DefinitionMessageContent gmt _ _ _ _))) = 
+--   case M.lookup gmt parserMap of
+--     Just get -> Just (lmt, get)
+--     _ -> Nothing
+-- getParserForMessage _ = Nothing
 
 getHeader :: Get MessageHeader
 getHeader = do
@@ -104,7 +126,7 @@ getDefinitionMessageContent hasDev = do
 
 getDefinitionMessageContentLE :: Bool -> Get DefinitionMessageContent 
 getDefinitionMessageContentLE hasDev = do
-  gmn <- typeParser
+  gmn <- fmap toMesgNum getWord16le
   numField <- fromIntegral <$> getWord8
   defCon <- V.replicateM (fromIntegral numField) getFieldDefinitionContents
   maybeDevFields <- if hasDev 
@@ -146,8 +168,8 @@ getBaseType = \case
 
 getFieldDefinitionContents :: Get FieldDefinitionContents
 getFieldDefinitionContents = do
-    fdn <- fromIntegral <$> getInt8
-    fieldSize <- fromIntegral <$> getInt8
+    fdn <- fromIntegral <$> getWord8
+    fieldSize <- fromIntegral <$> getWord8
     baseType <- getBaseType <$> getWord8
     return $ FieldDefinitionContents fdn fieldSize baseType
 

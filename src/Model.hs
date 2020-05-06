@@ -59,7 +59,7 @@ getLocalMessageType (CompressedTimestampHeader lmt _) = lmt
 -- Definition Message
 ---
 data DefinitionMessageContent = DefinitionMessageContent {
-  globalMessageNumber :: MesgNum,
+  globalMessageNumber :: Maybe MesgNum, -- this shouldn't be optional, but :shrug:
   numFields :: Int,
   fieldDefinitionContents :: Vector FieldDefinitionContents,
   numDeveloperFields :: Maybe Int,
@@ -71,7 +71,6 @@ data DefinitionMessageContent = DefinitionMessageContent {
 -- Data Message Contents
 --
 
-
 data FieldDefinitionContents
   = FieldDefinitionContents {
   fieldDefinitionNumber :: Int,
@@ -80,14 +79,9 @@ data FieldDefinitionContents
 }
   deriving (Eq, Ord, Show)
 
-
-
 data DeveloperFieldContents
   = DeveloperFieldContents 
     { fieldNumber :: Int
     , devFieldSize :: Int
     , devDataIndex :: Int }
   deriving (Eq, Ord, Show)
-
-
- 

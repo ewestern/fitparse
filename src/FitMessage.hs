@@ -1,6 +1,8 @@
 module FitMessage where
 
 import Data.Serialize.Get
+import Data.Vector (Vector)
+import qualified Data.Vector as V
 
 
 {-
@@ -8,5 +10,11 @@ import Data.Serialize.Get
  -}
 
 
-class FitMessage a where
-  messageParser :: Get a
+class Monoid a => FitMessage a where
+  messageParserByFieldNumber :: Int -> Get a
+
+  messageParserByFieldNumbers:: Vector Int -> Get a
+  messageParserByFieldNumbers vec = do
+    v <- traverse messageParserByFieldNumber vec
+    return $ foldr (<>) mempty v
+

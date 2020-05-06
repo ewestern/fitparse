@@ -61,20 +61,13 @@ getValue baseType val = undefined
 parseValue :: BaseType -> Text -> Either String Lit
 parseValue bt val = parser val
   where 
-    errorIfRemainder ::  Either String (a, Text) -> Either String a
-    errorIfRemainder = \case
-      Right (v, rem) -> if rem /= T.empty 
-                           then Left ("Could not parse: " <> T.unpack rem)
-                            else Right v
-      e -> fmap fst e
-
     decOrHex :: Integral a => Reader a
-    decOrHex t = case hexadecimal t of
-                   r@(Right _) -> r
-                   _ -> decimal t
+    decOrHex t = case decimal t of
+                   r@(Right (v, rem)) -> if rem == T.empty then r else hexadecimal t
+                   e -> e
 
     extractIntValue :: Integral a => (a -> Lit) -> Text -> Either String Lit
-    extractIntValue  f = fmap f . errorIfRemainder  . decOrHex
+    extractIntValue  f = fmap f . fmap fst  . decOrHex
 
     extractFracValue :: Fractional a => (a -> Lit) -> Text -> Either String Lit
     extractFracValue  f = fmap f . fmap fst  . rational
