@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import Data.Text.Read
 import Data.Text (Text)
 import Data.Either
-import Data.Char (toLower)
+import Data.Char (toLower, isSpace)
 import Data.List
 import Data.Csv hiding (Name)
 import Data.Text.Read
@@ -21,6 +21,7 @@ import qualified Data.Vector as V
 import Data.Serialize.Get
 import Control.Monad (join)
 import Control.Applicative ((<|>))
+import Control.Lens (makeLensesFor)
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
@@ -48,15 +49,12 @@ makeRecord typName (_, fieldNum, recName, typ)  = do
     Just innerTypeName <- lookupType typ
     Just maybe <- lookupType "Maybe"
     let bang = Bang NoSourceUnpackedness NoSourceStrictness
-    recordName <- newName $ recordName $ typName <> (typeifyName recName)
+    recordName <- newName $ recordName $ "_" <> typName <> (typeifyName recName)
 
     let vbt = (recordName, bang, AppT (ConT maybe) (ConT innerTypeName))
     case decimal fieldNum of 
       Right (v, _) ->  return $ Just (v, vbt)
       Left _ -> return Nothing
-    --case innerTypeName of
-    --  Just tn -> return (recordName, bang, AppT (ConT maybe) (ConT tn))
-    --  Nothing -> fail $ "Could not recognize type name: " <> (T.unpack typ)
 
 lookupType :: Text -> Q (Maybe Name)
 lookupType text = do
@@ -80,21 +78,6 @@ lookaheadOpt get = do
      then return Nothing
      else lookAheadM $ fmap Just get
 
-  {-
- instance Semigroup Footype where
-    (Footype a1 b1 b2) <> (Footype a2 b2 c2) = Footype (a1 <> a2) (b1 <> b2) (c1 <> c2)
-instance Monoid Footype where
-  mempty = Footype Nothing Nothing Nothing
-
-instance FitMessage Footype where
-  messageParserByIndex i = do
-    case i of
-      1 ->  do
-        v <- try typeParser
-        return mempty { eventTimestamp =  v }
-      2 -> mempty {event... = v }
-        ....
- -}
 
 try :: Get a -> Get (Maybe a)
 try get = (fmap Just get) <|> (return Nothing)
@@ -119,6 +102,12 @@ makeInstances messageName constructorName records = do
         let caseexp = CaseE (VarE varName) $ matches ++ [wildMatch]
         let fund = FunD parserName [Clause [VarP varName] (NormalB caseexp) []]
         return $ InstanceD Nothing [] (AppT (ConT cn) (ConT messageName)) [fund]
+
+      mkLens :: [(Int, VarBangType)] -> Q [Dec]
+      mkLens  = flip makeLensesFor messageName . fmap mkLens' 
+
+      mkLens' :: (Int, VarBangType) -> (String, String)
+      mkLens' (_, (name, _, _)) = (nameBase name, dropWhile ((==) '_') $ nameBase name)
 
       mkMatch :: (Int, VarBangType) -> Q Match
       mkMatch (fieldNum, (name, _, typ)) = do

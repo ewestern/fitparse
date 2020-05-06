@@ -37,8 +37,7 @@ library
                      , template-haskell
                      , cassava
                      , text
---                     , pipes
---                     , pipes-parse
+                     , lens
                      , vector
                      , bytestring
   ghc-options:
