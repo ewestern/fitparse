@@ -5,7 +5,7 @@ resolver: lts-15.3
 
 
 packages:
-- .
+- fitparse-core
 
 #extra-deps:
 #- pipes-cereal-0.1.0@sha256:97d3e773b748742d11d3590771d8adf84358694705ee4a0cdef38e6dc958d9d2,1103
