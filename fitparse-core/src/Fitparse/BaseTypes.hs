@@ -1,13 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module BaseTypes where
+module Fitparse.BaseTypes where
 
 import Data.Int
 import Data.Word
 import Data.Data
 import Data.Typeable
-import Signed
 import Data.ByteString.Lazy (ByteString)
 
 data BaseType
@@ -52,9 +51,9 @@ numElements size = \case
   BTUint64z -> div size 8
 
 
-type DateTime = Unsigned Word32
-type LocalDateTime = Unsigned Word32
-type LocaltimeIntoDay = Unsigned Word32
-type TimeIntoDay = Unsigned Word32
-type LocalDeviceType = Unsigned Word8
+type DateTime = Word32
+type LocalDateTime = Word32
+type LocaltimeIntoDay = Word32
+type TimeIntoDay = Word32
+type LocalDeviceType = Word8
 

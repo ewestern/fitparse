@@ -3,8 +3,8 @@ import Test.Hspec
 import Conduit
 import qualified Data.Conduit.Combinators as DC
 import Fitparse
-import Model
-import TH.ProfileMessages
+import Fitparse.Model
+import Fitparse.TH.ProfileMessages
 
 import THSpec
 
@@ -21,8 +21,8 @@ main = hspec $ do
     it "asd" $ do
       --1 `shouldBe` 1
       --return ()
-      let sample :: ConduitT () DataMessageContents M ()
-          sample =  (sourceFile "test/test.fit".| readFitFile  .| dataMessageFilter .| DC.take 22 )
+      let sample :: ConduitT () DataMessageContents (ResourceT IO) ()
+          sample =  (sourceFile "test/test.fit".| readFitFile  .| dataMessageFilter)
       ls <-runResourceT $  runConduit (sample .| sinkList)
       mapM_ print ls
       

@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module FitType where
+module Fitparse.FitType where
 
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSC
@@ -12,7 +12,7 @@ import Data.Int
 import Data.Serialize.Get
 import Data.Serialize.IEEE754
 import Data.Proxy
-import BaseTypes
+import Fitparse.BaseTypes
 
 -- TODO: deal with endianness!!!!
 class FitType a where

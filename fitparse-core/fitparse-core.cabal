@@ -1,4 +1,4 @@
-name:                fitparse
+name:                fitparse-core
 version:             0.1.0.0
 -- synopsis:
 -- description:
@@ -15,18 +15,16 @@ extra-source-files:  README.md
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Model
-                     , Signed
-                     , Parse
-                     , FileTypes
-                     , BaseTypes
+  exposed-modules:     Fitparse.Model
+                     , Fitparse.Parse
+                     , Fitparse.BaseTypes
+                     , Fitparse.FitType
+                     , Fitparse.FitMessage
+                     , Fitparse.TH.Types
+                     , Fitparse.TH.Messages
+                     , Fitparse.TH.ProfileTypes
+                     , Fitparse.TH.ProfileMessages
                      , Fitparse
-                     , FitType
-                     , FitMessage
-                     , TH.Types
-                     , TH.Messages
-                     , TH.ProfileTypes
-                     , TH.ProfileMessages
 
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
@@ -40,8 +38,6 @@ library
                      , lens
                      , vector
                      , bytestring
-  ghc-options:
-    -ddump-splices
 
 test-suite test
   type:                 exitcode-stdio-1.0
@@ -50,6 +46,6 @@ test-suite test
   main-is:              Spec.hs
   build-depends:       base >= 4.7 && < 5
                      , conduit
-                     , fitparse
+                     , fitparse-core
                      , hspec
                      , resourcet

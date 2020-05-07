@@ -5,7 +5,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 
-module TH.Messages where
+module Fitparse.TH.Messages where
 
 import qualified Data.Text as T
 import Data.Text.Read
@@ -27,10 +27,9 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax
 
-import TH.Types (typeifyName, parseBaseType, getInternalTypeName)
-
-import FitType
-import BaseTypes
+import Fitparse.TH.Types (typeifyName, parseBaseType, getInternalTypeName)
+import Fitparse.FitType
+import Fitparse.BaseTypes
 
 type RawMessageRow = [Text]
 type MessageRow = (Text, Text, Text, Text)
@@ -49,8 +48,7 @@ makeRecord typName (_, fieldNum, recName, typ)  = do
     Just innerTypeName <- lookupType typ
     Just maybe <- lookupType "Maybe"
     let bang = Bang NoSourceUnpackedness NoSourceStrictness
-    recordName <- newName $ recordName $ "_" <> typName <> (typeifyName recName)
-
+    recordName <- newName $  "_" <> (recordName $ typName <> (typeifyName recName))
     let vbt = (recordName, bang, AppT (ConT maybe) (ConT innerTypeName))
     case decimal fieldNum of 
       Right (v, _) ->  return $ Just (v, vbt)

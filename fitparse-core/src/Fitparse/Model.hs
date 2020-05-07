@@ -1,5 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
-module Model where
+module Fitparse.Model where
 
 import Data.Int
 import Data.Word
@@ -8,12 +8,10 @@ import qualified Data.Vector as V
 import Data.ByteString.Lazy (ByteString)
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
-import Signed
-import FileTypes
-import BaseTypes
 
-import TH.ProfileMessages
-import TH.ProfileTypes
+import Fitparse.BaseTypes
+import Fitparse.TH.ProfileMessages
+import Fitparse.TH.ProfileTypes
 
 --- 
 data GlobalHeader  = GlobalHeader {

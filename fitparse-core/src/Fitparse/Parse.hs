@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Parse where
+module Fitparse.Parse where
 
 import Data.Bits
 import Data.Int
@@ -19,12 +19,11 @@ import qualified Data.Vector as V
 import Control.Monad
 import Debug.Trace
 
-import Model
-import TH.ProfileMessages
-import FitType
-import TH.ProfileTypes
-import Signed
-import BaseTypes
+import Fitparse.Model
+import Fitparse.TH.ProfileMessages
+import Fitparse.FitType
+import Fitparse.TH.ProfileTypes
+import Fitparse.BaseTypes
 
 
 getGlobalHeader :: Get GlobalHeader

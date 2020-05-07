@@ -1,4 +1,4 @@
-module FitMessage where
+module Fitparse.FitMessage where
 
 import Data.Serialize.Get
 import Data.Vector (Vector)

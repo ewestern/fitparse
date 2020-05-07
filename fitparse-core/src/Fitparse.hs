@@ -1,6 +1,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
-module Fitparse where
+module Fitparse (
+    readFitFile
+  , dataMessageFilter
+  )where
 
 import qualified Data.Map as M
 import qualified Data.Vector as V
@@ -13,11 +16,10 @@ import Data.Typeable
 import Data.Word
 import Data.ByteString.Lazy (ByteString)
 
-import TH.ProfileMessages
-import Model
-import Parse
-import FileTypes
-import FitMessage
+import Fitparse.TH.ProfileMessages
+import Fitparse.Model
+import Fitparse.Parse
+import Fitparse.FitMessage
 
 readFitFile :: ConduitT BS.ByteString (Either String Message) M ()
 readFitFile = do

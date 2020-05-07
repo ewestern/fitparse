@@ -1,9 +1,9 @@
 {-# LANGUAGE QuasiQuotes #-}
-module TH.ProfileTypes where
+module Fitparse.TH.ProfileTypes where
 
 import Data.Serialize.Get
-import TH.Types
-import FitType
+import Fitparse.TH.Types
+import Fitparse.FitType
 
 
 [fittype|profile/types.csv|]
