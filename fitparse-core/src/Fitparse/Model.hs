@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Fitparse.Model where
 
 import Data.Int
@@ -8,6 +9,7 @@ import qualified Data.Vector as V
 import Data.ByteString.Lazy (ByteString)
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
+import Control.Lens
 
 import Fitparse.BaseTypes
 import Fitparse.TH.ProfileMessages
@@ -83,3 +85,5 @@ data DeveloperFieldContents
     , devFieldSize :: Int
     , devDataIndex :: Int }
   deriving (Eq, Ord, Show)
+
+makePrisms ''Message
