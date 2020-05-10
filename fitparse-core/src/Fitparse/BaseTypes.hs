@@ -29,6 +29,26 @@ data BaseType
   | BTUint64z
   deriving (Eq, Ord, Show, Data, Typeable)
 
+data BaseValue
+  = BVEnum Word8
+  | BVSint8 Int8
+  | BVUint8 Word8
+  | BVSint16 Int16
+  | BVUint16 Word16
+  | BVSint32 Int32
+  | BVUint32 Word32
+  | BVString ByteString
+  | BVFloat32 Float
+  | BVFloat64 Double
+  | BVUint8z Word8
+  | BVUint16z Word16
+  | BVUint32z Word32
+  | BVByte Word8
+  | BVSint64 Int64
+  | BVUint64 Word64
+  | BVUint64z Word64
+  deriving (Eq, Ord, Show, Data, Typeable)
+
 
 numElements :: Int -> BaseType -> Int
 numElements size = \case

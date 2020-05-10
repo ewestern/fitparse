@@ -45,43 +45,44 @@ getMessage :: M.Map Int (MessageHeader, DefinitionMessageContent) -> Get (Either
 getMessage defs = do
   header <- getHeader
   case header of
-    NormalHeader DefinitionMessageType lmt hasDev ->
-      Right . DefinitionMessage header <$> (getDefinitionMessageContent hasDev)
+    NormalHeader DefinitionMessageType lmt hasDev -> do
+      eitherDMC <- getDefinitionMessageContent hasDev
+      pure $ DefinitionMessage header <$> eitherDMC
+    NormalHeader DataMessageType lmt hasDev -> matchDataMessage lmt hasDev header
+    CompressedTimestampHeader lmt to -> matchDataMessage lmt hasDev header
 
-    NormalHeader DataMessageType lmt hasDev -> case M.lookup lmt defs of
-      Just (header, definition) -> getMessageWithFieldDefinitions header definition
-      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
-    CompressedTimestampHeader lmt to -> case M.lookup lmt defs of
-      Just (header, definition) -> getMessageWithFieldDefinitions header definition
-      Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> (show $ M.keys defs))
+    where
+      matchDataMessage lmt hasDev head = case M.lookup lmt defs of
+        Just (header, definition) -> getMessageWithFieldDefinitions header definition head
+        Nothing -> pure $ Left ("Could not find local message type: " <> show lmt <> ". Header = " <> (show head))
 
-getMessageWithFieldDefinitions :: MessageHeader -> DefinitionMessageContent -> Get (Either String Message)
-getMessageWithFieldDefinitions header@(NormalHeader _ lmc _) (DefinitionMessageContent gmn numFields fdc ndf df)
+
+getMessageWithFieldDefinitions :: MessageHeader -> DefinitionMessageContent -> MessageHeader -> Get (Either String Message)
+getMessageWithFieldDefinitions definitionHeader@(NormalHeader _ lmc _) def@(DefinitionMessageContent gmn numFields fdc ndf df) dataMessageHeader
   = do byteString <- getBytes $ sum $ fmap fieldSize fdc
        let vec = fmap fieldDefinitionNumber fdc
        case join $ traverse (flip M.lookup parserMap) gmn  of
-         Just dmcParser -> return $ fmap (DataMessage header) $ runGet (dmcParser vec) byteString
-         Nothing -> return $ Left $ "Couldn't find message num: " <> (show gmn)
+         Just dmcParser -> pure $ fmap (DataMessage dataMessageHeader) $ runGet (dmcParser vec) byteString
+         Nothing -> pure $ fmap (UnstructuredDataMessage dataMessageHeader) $ runGet (getUnstructuredContent def) byteString
     where
       getByteString :: V.Vector BS.ByteString -> M.Map Int Int -> Int -> Maybe BS.ByteString
       getByteString byteStrings indexMap i = do
         idx <- M.lookup i indexMap
         byteStrings V.!? idx
 
+getUnstructuredContent :: DefinitionMessageContent -> Get UnstructuredContent
+getUnstructuredContent (DefinitionMessageContent gmn numFields fieldDefs numDevFields devFieldContents) = 
+  -- TODO: probably need to consider order here????
+  traverse getField fieldDefs
+  where 
+    getField (FieldDefinitionContents defNum fieldSize (Just bt)) = 
+      V.singleton <$> getBaseValueByType bt
+
 getHeaderForMap :: Either String Message -> Maybe (Int, (MessageHeader, DefinitionMessageContent))
 getHeaderForMap (Right (DefinitionMessage header@(NormalHeader mt lmt _) defMessage)) 
   = Just (lmt, (header, defMessage))
 getHeaderForMap _ = Nothing
   
-
-
-
--- getParserForMessage ::Either String Message -> Maybe (Int, Get DataMessageContents)
--- getParserForMessage (Right (DefinitionMessage (NormalHeader mt lmt _) (DefinitionMessageContent gmt _ _ _ _))) = 
---   case M.lookup gmt parserMap of
---     Just get -> Just (lmt, get)
---     _ -> Nothing
--- getParserForMessage _ = Nothing
 
 getHeader :: Get MessageHeader
 getHeader = do
@@ -91,10 +92,13 @@ getHeader = do
     else pure $ getNormalHeader i
 
 
+localMessageNumberMask :: Word8
+localMessageNumberMask = foldl setBit zeroBits [0..3]
+
 getNormalHeader :: Word8 -> MessageHeader  
 getNormalHeader i = 
   let messageType = if testBit i 6 then DefinitionMessageType else DataMessageType
-      localNum = fromIntegral $ shiftL i 4
+      localNum = fromIntegral $ i .&. localMessageNumberMask
   in NormalHeader messageType localNum (testBit i 5)
   
   
@@ -103,17 +107,17 @@ timestampMask :: Word8
 timestampMask = foldl setBit zeroBits [0..4]
 
 timestampLocalMessageTypeMask :: Word8
-timestampLocalMessageTypeMask = foldl setBit zeroBits [6,7]
+timestampLocalMessageTypeMask = foldl setBit zeroBits [0,1]
 
 
 
 getTimestampHeader :: Word8 -> MessageHeader
 getTimestampHeader i =
   let off = i .&. timestampMask
-      localNum = shiftR i 1 .&. timestampLocalMessageTypeMask
+      localNum = (shiftR i 5) .&. timestampLocalMessageTypeMask
   in  CompressedTimestampHeader (fromIntegral localNum) (fromIntegral off)
 
-getDefinitionMessageContent :: Bool -> Get DefinitionMessageContent 
+getDefinitionMessageContent :: Bool -> Get (Either String DefinitionMessageContent)
 getDefinitionMessageContent hasDev = do
   _ <- getWord8
   arch <- getWord8
@@ -123,9 +127,9 @@ getDefinitionMessageContent hasDev = do
     else getDefinitionMessageContentLE hasDev
   
 
-getDefinitionMessageContentLE :: Bool -> Get DefinitionMessageContent 
+getDefinitionMessageContentLE :: Bool -> Get (Either String DefinitionMessageContent)
 getDefinitionMessageContentLE hasDev = do
-  gmn <- fmap toMesgNum getWord16le
+  gmn <- getWord16le
   numField <- fromIntegral <$> getWord8
   defCon <- V.replicateM (fromIntegral numField) getFieldDefinitionContents
   maybeDevFields <- if hasDev 
@@ -134,7 +138,8 @@ getDefinitionMessageContentLE hasDev = do
        fieldDefs <- V.replicateM (fromIntegral numFields) getDevFieldDef
        return $ Just (numFields, fieldDefs)
       else return Nothing
-  pure $ DefinitionMessageContent gmn numField defCon (fmap fst maybeDevFields) (fmap snd maybeDevFields) 
+  pure $ Right $ DefinitionMessageContent (toMesgNum gmn) numField defCon (fmap fst maybeDevFields) (fmap snd maybeDevFields) 
+
     where
       getDevFieldDef :: Get DeveloperFieldContents
       getDevFieldDef = DeveloperFieldContents <$> getIntByte <*> getIntByte <*> getIntByte
@@ -172,4 +177,24 @@ getFieldDefinitionContents = do
     baseType <- getBaseType <$> getWord8
     return $ FieldDefinitionContents fdn fieldSize baseType
 
+
+getBaseValueByType :: BaseType -> Get BaseValue
+getBaseValueByType = \case
+  BTEnum ->     BVEnum <$> typeParser
+  BTSint8 ->    BVSint8 <$> typeParser
+  BTUint8 ->    BVUint8 <$> typeParser
+  BTSint16 ->   BVSint16 <$> typeParser
+  BTUint16 ->   BVUint16 <$> typeParser 
+  BTSint32 ->   BVSint32 <$> typeParser
+  BTUint32 ->   BVUint32 <$> typeParser
+  BTString ->   BVString <$> typeParser
+  BTFloat32 ->  BVFloat32 <$> typeParser
+  BTFloat64 ->  BVFloat64 <$> typeParser
+  BTUint8z ->   BVUint8z <$> typeParser
+  BTUint16z ->  BVUint16z <$> typeParser
+  BTUint32z ->  BVUint32z <$> typeParser
+  BTByte ->     BVByte <$> typeParser
+  BTSint64 ->   BVSint64 <$> typeParser
+  BTUint64 ->   BVUint64 <$> typeParser
+  BTUint64z ->  BVUint64z <$> typeParser
 

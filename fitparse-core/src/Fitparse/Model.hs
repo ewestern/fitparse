@@ -25,10 +25,13 @@ data GlobalHeader  = GlobalHeader {
 
 data Message  
     = DataMessage MessageHeader DataMessageContents
+    | UnstructuredDataMessage MessageHeader UnstructuredContent
     | DefinitionMessage MessageHeader DefinitionMessageContent
     | GlobalHeaderMessage GlobalHeader 
   deriving (Eq, Show)
 
+
+type UnstructuredContent = Vector (Vector BaseValue)
 
 --
 -- Message Header

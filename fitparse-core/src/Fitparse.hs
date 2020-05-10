@@ -1,13 +1,19 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 module Fitparse (
-    readFitFile
+    readRawFitFile
+  , readFitMessages
   , dataMessageFilter
+  , RecordStream
+  , module Fitparse.TH.ProfileMessages
+  , module Fitparse.TH.ProfileTypes
   )where
 
 import qualified Data.Map as M
 import qualified Data.Vector as V
 import Conduit
+import Control.Lens
+import qualified Data.Conduit.List as CL
 import           Control.Exception.Base
 import qualified Data.ByteString as BS
 import Data.Serialize.Get
@@ -17,12 +23,20 @@ import Data.Word
 import Data.ByteString.Lazy (ByteString)
 
 import Fitparse.TH.ProfileMessages
+import Fitparse.TH.ProfileTypes
 import Fitparse.Model
 import Fitparse.Parse
 import Fitparse.FitMessage
 
-readFitFile :: ConduitT BS.ByteString (Either String Message) M ()
-readFitFile = do
+
+
+type RecordStream a = ConduitT DataMessageContents a M ()
+
+readFitMessages :: ConduitT BS.ByteString DataMessageContents M ()
+readFitMessages = readRawFitFile .| CL.mapMaybe (preview $ _Right . _DataMessage) .| CL.mapMaybe (preview _2)
+
+readRawFitFile :: ConduitT BS.ByteString (Either String Message) M ()
+readRawFitFile = do
   gh <- sinkGet getGlobalHeader
   yield $ Right $ GlobalHeaderMessage gh
   messagesConduit
@@ -46,9 +60,11 @@ newtype GetException = GetException String
 
 instance Exception GetException
 
-type State = M.Map Int (MessageHeader, DefinitionMessageContent)
 
 type M = ResourceT IO
+
+
+type State = M.Map Int (MessageHeader, DefinitionMessageContent)
 
 messagesConduit :: ConduitT BS.ByteString (Either String Message) M ()
 messagesConduit  =
