@@ -32,10 +32,10 @@ import Fitparse.FitType
 import Fitparse.BaseTypes
 
 type RawMessageRow = [Text]
-type MessageRow = (Text, Text, Text, Text, Text)
+type MessageRow = (Text, Text, Text, Text, Text, Text, Text)
 
 dropColumns :: RawMessageRow -> MessageRow 
-dropColumns (a:b:c:d:e:_) = (a, b, c, d, e)
+dropColumns (a:b:c:d:e:_:g:h:_) = (a, b, c, d, e, g, h)
 
 
 recordName :: String -> String
@@ -46,17 +46,44 @@ isArray :: String -> Bool
 isArray [] = False
 isArray (x:xs) = x == '[' && (last xs) == ']'
 
-makeRecord :: String -> MessageRow -> Q (Maybe (Int, VarBangType))
-makeRecord typName (_, fieldNum, recName, typ, arr)  = do
-    Just innerTypeName <- lookupType typ
+extractScale :: Text -> Maybe Float
+extractScale t = case rational t of
+                   Right (v, _) -> Just v
+                   Left _ -> Nothing
+
+extractOffset :: Text -> Maybe Float
+extractOffset t = case rational t of
+                    Right (v, _) -> Just v
+                    Left _ -> Nothing
+
+guardFloat :: Text -> (Text -> Maybe Float) -> Text ->  Maybe Float
+guardFloat typ func = 
+  if elem typ ["sint8", "sint16", "sint32", "sint64"
+              , "uint8", "uint16", "uint32", "uint64"
+              , "float32", "float64"]
+     then func
+     else const Nothing
+
+
+
+makeRecord :: String -> MessageRow -> Q (Maybe (Int, VarBangType, Type, Maybe Float, Maybe Float))
+makeRecord typName (_, fieldNum, recName, typ, arr, scale, offset)  = do
     Just maybe <- lookupType "Maybe"
     Just vec <- lookupType "Vector"
     let bang = Bang NoSourceUnpackedness NoSourceStrictness
     recordName <- newName $  (recordName $ typName <> (typeifyName recName))
     let container = if isArray $ T.unpack arr then vec else maybe
-    let vbt = (recordName, bang, AppT (ConT container) (ConT innerTypeName))
+    let maybeScale = guardFloat typ extractScale scale
+    let maybeOffset = guardFloat typ extractOffset offset
+    Just rawType <- lookupType typ
+    Just finalType <- if length (catMaybes [maybeScale, maybeOffset]) > 0
+                        then do
+                          Just fn <- lookupTypeName "Float"
+                          pure $ Just (ConT fn)
+                        else return $ Just $ ConT rawType
+    let vbt = (recordName, bang, AppT (ConT container) finalType)
     case decimal fieldNum of 
-      Right (v, _) ->  return $ Just (v, vbt)
+      Right (v, _) ->  return $ Just (v, vbt, AppT (ConT container) (ConT rawType), maybeScale, maybeOffset)
       Left _ -> return Nothing
 
 lookupType :: Text -> Q (Maybe Name)
@@ -85,8 +112,8 @@ lookaheadOpt get = do
 try :: Alternative m => Get a -> Get (m a)
 try get = (fmap pure get) <|> (return empty)
 
-makeInstances :: Name -> Name -> [(Int, Name)] -> Q [Dec]
-makeInstances messageName constructorName lensNames = do
+makeInstances :: Name -> Name -> [(Int, Name, Type, Maybe Float, Maybe Float)] -> Q [Dec]
+makeInstances messageName constructorName recordInfo = do
   semi <- mkSemiInstance
   mon <- mkMonoidInstance
   fit <- mkFitMsgInstance
@@ -100,28 +127,51 @@ makeInstances messageName constructorName lensNames = do
         Just mempty <- lookupValueName "mempty"
         Just ret <- lookupValueName "return" 
         varName <- newName "i"
-        matches <- traverse mkMatch lensNames
+        matches <- traverse mkMatch recordInfo
         let wildMatch = Match WildP (NormalB $ AppE (VarE ret) $ VarE mempty) []
         let caseexp = CaseE (VarE varName) $ matches ++ [wildMatch]
         let fund = FunD parserName [Clause [VarP varName] (NormalB caseexp) []]
         return $ InstanceD Nothing [] (AppT (ConT cn) (ConT messageName)) [fund]
 
 
-      mkMatch :: (Int, Name) -> Q Match
-      mkMatch (fieldNum, name) = do
+      mkMatch :: (Int, Name, Type, Maybe Float, Maybe Float) -> Q Match
+      mkMatch (fieldNum, lensName, rawType, maybeScale, maybeOffset) = do
           Just mEmpty <- lookupValueName "mempty" 
           Just try' <- lookupValueName "try" 
           Just tp <- lookupValueName "typeParser" 
+          Just rtf <- lookupValueName "realToFrac" 
           Just ret <- lookupValueName "return" 
           Just dolla <- lookupValueName "$" 
           Just set <- lookupValueName "Control.Lens.set" 
+          Just compose <- lookupValueName "."
           var  <- newName "v"
+          Just flip' <- lookupValueName "flip"
+          Just fmap' <- lookupValueName "fmap"
+          scaled <- case maybeScale of
+                      Just scale -> do
+                          Just div <- lookupValueName "/"
+                          let divE = (AppE (AppE (VarE flip') (VarE div)) (LitE $ RationalL $ realToFrac scale))
+                          pure $  AppE (VarE fmap') $ UInfixE divE (VarE compose) (VarE rtf)
+                          -- (fmap ((*) 123.0) . realToFrac)
+                      Nothing -> [|fmap id |]
+          offsetted <- case maybeOffset of
+                         Just off -> do
+                              Just minus <- lookupValueName "-"
+                              let minusE = (AppE (AppE (VarE flip') (VarE minus)) (LitE $ RationalL $ realToFrac off))
+                              pure $ AppE (VarE fmap') $ UInfixE minusE (VarE compose) (VarE rtf)
+                              -- (fmap ((+) 1234.0) . realToFrac)
+                         Nothing -> [|fmap id |]
+
+          let composed = UInfixE scaled (VarE compose) offsetted
+          let applied = AppE composed (VarE var)
+
           -- ((set lensName) v) mempty
-          let recUpdate = AppE (AppE (AppE (VarE set) (VarE name)) (VarE var)) (VarE mEmpty)
+          let recUpdate = AppE (AppE (AppE (VarE set) (VarE lensName)) applied) (VarE mEmpty)
           -- return $ ((set lensName) v) mempty
           let retExp = UInfixE (VarE ret) (VarE dolla) recUpdate
           -- do v <- try typeParser ; return $ ((set lensName) v) mempty
-          let doExp = DoE [BindS (VarP var) (AppE (VarE try') (VarE tp)), NoBindS retExp]
+          let typedVar = SigP (VarP var) rawType
+          let doExp = DoE [BindS typedVar (AppE (VarE try') (VarE tp)), NoBindS retExp]
           return $ Match (LitP $ IntegerL $ fromIntegral fieldNum) (NormalB doExp) []
 
       mkMonoidInstance :: Q Dec
@@ -129,7 +179,7 @@ makeInstances messageName constructorName lensNames = do
         Just cn <- lookupTypeName "Monoid"
         Just mEmpty <- lookupValueName "mempty"
         Just empty <- lookupValueName "empty"
-        let empties = replicate (length lensNames) empty
+        let empties = replicate (length recordInfo) empty
         let exp = foldl (\exp name -> AppE exp (VarE name)) (ConE constructorName) $ empties
         let fund = FunD mEmpty [Clause [] (NormalB exp) []]
         return $ InstanceD Nothing [] (AppT (ConT cn) (ConT messageName)) [fund]
@@ -143,8 +193,8 @@ makeInstances messageName constructorName lensNames = do
         Just cn <- lookupTypeName "Semigroup"
         Just mConcat <- lookupValueName "<>"
         Just alternative <- lookupValueName "<|>"
-        leftNames <- traverse newName $ fmap (\s -> s ++ "1") $ take (length lensNames)  range
-        rightNames <- traverse newName $ fmap (\s -> s ++ "2") $ take (length lensNames) range 
+        leftNames <- traverse newName $ fmap (\s -> s ++ "1") $ take (length recordInfo)  range
+        rightNames <- traverse newName $ fmap (\s -> s ++ "2") $ take (length recordInfo) range 
         let leftPat = ConP constructorName $ fmap VarP leftNames
         let rightPat = ConP constructorName $ fmap VarP rightNames
         let exps = fmap (\(l, r) -> UInfixE (VarE l) (VarE alternative) (VarE r) ) $ leftNames `zip` rightNames
@@ -153,26 +203,22 @@ makeInstances messageName constructorName lensNames = do
         return $ InstanceD Nothing [] (AppT (ConT cn) (ConT messageName)) [fund]
 
   
---orElse :: Maybe a -> Maybe a -> Maybe a
---orElse ma mb = case ma of
---                 Just x -> ma
---                 Nothing -> mb
-
 makeMessageType :: [MessageRow] -> Q ([Dec], Exp, Con)
 makeMessageType [] = fail "Should not get empty MessageRow list."
-makeMessageType ((messageName, _, _, _, _):xs) = do
+makeMessageType ((messageName, _, _, _, _, _, _):xs) = do
   let name = typeifyName messageName
   Just messageNumName <- lookupValueName $ "MesgNum" <>  name
   tName <- newName $ name <> "Message"
   mName <- newName $ name <> "Message"
   unsortedRecords <- traverse (makeRecord name) xs
-  let records =  sortOn fst $ catMaybes unsortedRecords
+  let records =  sortOn (\(i, _, _, _, _) -> i) $ catMaybes unsortedRecords
   Just showName <- lookupTypeName "Show"
   Just eqName <- lookupTypeName "Eq"
-  let datadec = DataD [] tName [] Nothing [RecC mName $ fmap snd records] [DerivClause Nothing [ConT showName, ConT eqName]]
+  let varBangTypes = fmap (\(_, v, _, _, _) -> v) records
+  let datadec = DataD [] tName [] Nothing [RecC mName $ varBangTypes] [DerivClause Nothing [ConT showName, ConT eqName]]
   lens <- declareLenses $ return [datadec]
-  let lensNames = fmap (\((i,r),n) -> (i, n)) $ zip records $ getLensNames lens
-  inst <- makeInstances tName mName lensNames
+  let recordInfo = fmap (\(i, (n, _, _), rt,  s, o) -> (i, n, rt, s, o)) records 
+  inst <- makeInstances tName mName recordInfo
   -- TopLevel constructor name
   let bang = Bang NoSourceUnpackedness NoSourceStrictness
   cName <- newName $ "Data" <> name <> "Message"
@@ -181,13 +227,10 @@ makeMessageType ((messageName, _, _, _, _):xs) = do
   Just fmapName <- lookupValueName "fmap"
   Just compose <- lookupValueName "."
   Just mpName <- lookupValueName "messageParserByFieldNumbers"
+  -- (MesgNumFooBar, fmap FooBarConstructor . messageParserByFieldNumbers )
   let tup = TupE [ConE messageNumName, UInfixE (AppE (VarE fmapName) (ConE cName)) (VarE compose) (VarE mpName)]
   return $ (lens ++ inst, tup, cons)
 
-getLensNames :: [Dec] -> [Name]
-getLensNames [] = []
-getLensNames ((FunD n cs):xs) = n:(getLensNames xs)
-getLensNames (_:xs) = getLensNames xs
 
 partitionRows :: [MessageRow] -> [[MessageRow]]
 partitionRows [] = []
@@ -196,10 +239,10 @@ partitionRows rows =
       (records, remainder) = span isValRow xs
   in (x:records):(partitionRows remainder)
   where
-     isBlank (a, b, c, d, e) = all ((==) T.empty) [a, b, c, d, e]
-     isTypeRow (typName, _, _, _, _) = typName /= T.empty
-     isValRow (_, idx, recName, baseType, _) = recName /= T.empty && baseType /= T.empty
-     isSectionRow (_, _, c, section, _) = section /= T.empty && c == T.empty
+     isBlank (a, b, c, d, e, f, g) = all ((==) T.empty) [a, b, c, d, e, f, g]
+     isTypeRow (typName, _, _, _, _, _, _) = typName /= T.empty
+     isValRow (_, idx, recName, baseType, _, _, _) = recName /= T.empty && baseType /= T.empty
+     isSectionRow (_, _, c, section, _, _, _) = section /= T.empty && c == T.empty
 
 fitMessageQ :: String -> Q [Dec]
 fitMessageQ str = 

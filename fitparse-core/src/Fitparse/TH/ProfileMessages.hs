@@ -1,5 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Fitparse.TH.ProfileMessages where
 
 import Data.Int
