@@ -119,18 +119,24 @@ makeInstances messageName constructorName recordInfo = do
   fit <- mkFitMsgInstance
   return $ [semi, mon, fit]
 
+  {-
+ _ -> 
+ -}
   where 
       mkFitMsgInstance :: Q Dec
       mkFitMsgInstance = do
         Just cn <- lookupTypeName "FitMessage"
-        Just parserName <- lookupValueName "messageParserByFieldNumber"
-        Just mempty <- lookupValueName "mempty"
-        Just ret <- lookupValueName "return" 
+        Just parserName <- lookupValueName "messageParserByField"
+        Just fdcConstructor <- lookupValueName "FieldDefinitionContents"
+        -- Just ret <- lookupValueName "return" 
         varName <- newName "i"
+        sizeName <- newName "size"
         matches <- traverse mkMatch recordInfo
-        let wildMatch = Match WildP (NormalB $ AppE (VarE ret) $ VarE mempty) []
+        wildExp <- [|getBytes size >> return mempty|]
+        let wildMatch = Match WildP (NormalB $ wildExp) []
         let caseexp = CaseE (VarE varName) $ matches ++ [wildMatch]
-        let fund = FunD parserName [Clause [VarP varName] (NormalB caseexp) []]
+        let pattern = ConP fdcConstructor [VarP varName, VarP sizeName, WildP]
+        let fund = FunD parserName [Clause [pattern] (NormalB caseexp) []]
         return $ InstanceD Nothing [] (AppT (ConT cn) (ConT messageName)) [fund]
 
 
@@ -226,7 +232,7 @@ makeMessageType ((messageName, _, _, _, _, _, _):xs) = do
   -- partial for parser map
   Just fmapName <- lookupValueName "fmap"
   Just compose <- lookupValueName "."
-  Just mpName <- lookupValueName "messageParserByFieldNumbers"
+  Just mpName <- lookupValueName "messageParserByFields"
   -- (MesgNumFooBar, fmap FooBarConstructor . messageParserByFieldNumbers )
   let tup = TupE [ConE messageNumName, UInfixE (AppE (VarE fmapName) (ConE cName)) (VarE compose) (VarE mpName)]
   return $ (lens ++ inst, tup, cons)

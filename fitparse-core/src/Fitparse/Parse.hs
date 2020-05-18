@@ -24,6 +24,7 @@ import Fitparse.TH.ProfileMessages
 import Fitparse.FitType
 import Fitparse.TH.ProfileTypes
 import Fitparse.BaseTypes
+import Fitparse.FitMessage
 
 
 getGlobalHeader :: Get GlobalHeader
@@ -60,9 +61,13 @@ getMessage defs = do
 getMessageWithFieldDefinitions :: MessageHeader -> DefinitionMessageContent -> MessageHeader -> Get (Either String Message)
 getMessageWithFieldDefinitions definitionHeader@(NormalHeader _ lmc _) def@(DefinitionMessageContent gmn numFields fdc ndf df) dataMessageHeader
   = do byteString <- getBytes $ sum $ fmap fieldSize fdc
-       let vec = fmap fieldDefinitionNumber fdc
+       case gmn of
+         Just MesgNumRecord -> do
+            let unstructured = runGet (getUnstructuredContent def) byteString
+            traceShowM unstructured
+         _ -> pure ()
        case join $ traverse (flip M.lookup parserMap) gmn  of
-         Just dmcParser -> pure $ fmap (DataMessage dataMessageHeader) $ runGet (dmcParser vec) byteString
+         Just dmcParser -> pure $ fmap (DataMessage dataMessageHeader) $ runGet (dmcParser fdc) byteString
          Nothing -> pure $ fmap (UnstructuredDataMessage dataMessageHeader) $ runGet (getUnstructuredContent def) byteString
     where
       getByteString :: V.Vector BS.ByteString -> M.Map Int Int -> Int -> Maybe BS.ByteString
@@ -72,7 +77,6 @@ getMessageWithFieldDefinitions definitionHeader@(NormalHeader _ lmc _) def@(Defi
 
 getUnstructuredContent :: DefinitionMessageContent -> Get UnstructuredContent
 getUnstructuredContent (DefinitionMessageContent gmn numFields fieldDefs numDevFields devFieldContents) = 
-  -- TODO: probably need to consider order here????
   traverse getField fieldDefs
   where 
     getField (FieldDefinitionContents defNum fieldSize (Just bt)) = 

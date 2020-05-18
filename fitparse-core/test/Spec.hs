@@ -1,18 +1,19 @@
+{-#LANGUAGE RankNTypes #-}
+{-#LANGUAGE FlexibleContexts #-}
+{-#LANGUAGE MultiParamTypeClasses #-}
+
 module Main where
 import Test.Hspec
 import Conduit
+import Control.Lens
+import Data.Monoid
 import qualified Data.Conduit.Combinators as DC
+import qualified Data.Conduit.List as CL
 import Fitparse
 import Fitparse.Model
 import Fitparse.TH.ProfileMessages
 
 import THSpec
-
-
---describe "Relatable" $ do
---  describe "contains" $ do
---    it "should relate a polygon containing a point " $ contains poly1 point1 `shouldBe` True
-
   
 main :: IO ()
 main = hspec $ do
@@ -21,8 +22,7 @@ main = hspec $ do
     it "asd" $ do
       --1 `shouldBe` 1
       --return ()
-      let sample :: ConduitT () DataMessageContents (ResourceT IO) ()
-          sample =  (sourceFile "test/test.fit".| readFitFile  .| dataMessageFilter)
+      let sample =  (sourceFile "test/test_2.fit".| readRawFitFile .| takeC 50)
       ls <-runResourceT $  runConduit (sample .| sinkList)
       mapM_ print ls
       

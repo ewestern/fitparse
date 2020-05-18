@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy as BSL
 import Control.Lens
 
 import Fitparse.BaseTypes
+import Fitparse.FitMessage
 import Fitparse.TH.ProfileMessages
 import Fitparse.TH.ProfileTypes
 
@@ -74,13 +75,6 @@ data DefinitionMessageContent = DefinitionMessageContent {
 -- Data Message Contents
 --
 
-data FieldDefinitionContents
-  = FieldDefinitionContents {
-  fieldDefinitionNumber :: Int,
-  fieldSize :: Int, -- in bytes
-  baseType :: Maybe BaseType
-}
-  deriving (Eq, Ord, Show)
 
 data DeveloperFieldContents
   = DeveloperFieldContents 
