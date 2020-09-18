@@ -1,0 +1,10 @@
+cradle:
+  stack:
+    - path: "./fitparse-query/"
+      component: "fitparse-query:lib"
+    - path: "./fitparse-core/"
+      component: "fitparse-core:lib"
+      #- path: "./test/functional/"
+      #  component: "test:func-test"
+      # component: "fitparse-query:lib"
+    #component: "fitparse-core:test:test"

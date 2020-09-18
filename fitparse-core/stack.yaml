@@ -5,8 +5,5 @@ resolver: lts-15.3
 
 
 packages:
-- fitparse-core
-- fitparse-query
-
-  #extra-deps:
+- .
 

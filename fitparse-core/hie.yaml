@@ -1,0 +1,4 @@
+cradle:
+  stack:
+    component: "fitparse-query:lib"
+    #component: "fitparse-core:test:test"
