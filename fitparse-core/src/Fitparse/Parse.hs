@@ -63,8 +63,9 @@ getMessageWithFieldDefinitions definitionHeader@(NormalHeader _ lmc _) def@(Defi
   = do byteString <- getBytes $ sum $ fmap fieldSize fdc
        case gmn of
          Just MesgNumRecord -> do
-            let unstructured = runGet (getUnstructuredContent def) byteString
-            traceShowM unstructured
+            let _  = runGet (getUnstructuredContent def) byteString
+            -- for now, ignore unstructured content
+            pure ()
          _ -> pure ()
        case join $ traverse (flip M.lookup parserMap) gmn  of
          Just dmcParser -> pure $ fmap (DataMessage dataMessageHeader) $ runGet (dmcParser fdc) byteString
